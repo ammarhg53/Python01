@@ -530,18 +530,26 @@ def pos_panel():
                     
                     gst_config = {'enabled': settings.get("gst_enabled")=="True", 'percent': float(settings.get("gst_percent", 18))}
                     oid, tot, gst = st.session_state.user.process_order(mobile_input, st.session_state.cart, pay_mode, gst_config)
-                    st.success(f"Order {oid} Successful!")
                     
+                    # Generate PDF with Correct Filename logic
                     inv_data = {
                         'id': oid, 'store_name': settings.get("store_name"),
                         'customer_name': cust_name, 'customer_mobile': mobile_input,
                         'items': st.session_state.cart.values(), 'gst': gst, 'total': tot
                     }
                     pdf_file = generate_pdf(inv_data)
+                    
+                    # Read generated PDF for download button
                     with open(pdf_file, "rb") as f:
-                        st.download_button("📄 Download Bill", f, file_name=pdf_file)
+                        pdf_data = f.read()
+
+                    # Success and Download (No Rerun immediately to allow download)
+                    st.success(f"Order {oid} Successful!")
+                    st.download_button("📄 Download Bill", data=pdf_data, file_name=pdf_file, mime="application/pdf")
+                    
+                    # Clear Cart
                     st.session_state.cart = {}
-                    st.rerun()
+                    # Removed st.rerun() so download button is visible
 
     elif menu == "Profile":
         profile_section()
