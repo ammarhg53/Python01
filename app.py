@@ -14,8 +14,10 @@ st.markdown("""
 <style>
     .stButton>button { width: 100%; border-radius: 8px; }
     .card { padding: 15px; border: 1px solid #ddd; border-radius: 10px; margin-bottom: 10px; background: white; text-align: center; height: 100%; }
-    .stock-green { color: green; font-weight: bold; }
-    .stock-red { color: red; font-weight: bold; }
+    .card h4 { color: #000000 !important; font-weight: bold; margin: 0; }
+    .card p { color: #333333 !important; }
+    .stock-green { color: green !important; font-weight: bold; }
+    .stock-red { color: red !important; font-weight: bold; }
     .big-font { font-size: 18px !important; }
     .main-header { font-size: 24px; font-weight: bold; color: #333; }
 </style>
@@ -145,10 +147,20 @@ def admin_panel():
         st.subheader("Order History")
         filter_status = st.selectbox("Filter Status", ["All", "active", "cancelled"])
         
-        query = "SELECT order_id, timestamp, customer_mobile, total_amount, status, cancellation_reason FROM orders"
+        # Enhanced query to include customer name
+        query = """
+            SELECT o.order_id, o.timestamp, c.name as customer_name, o.customer_mobile, o.total_amount, o.status, o.cancellation_reason 
+            FROM orders o 
+            LEFT JOIN customers c ON o.customer_mobile = c.mobile
+        """
+        conditions = []
         if filter_status != "All":
-            query += f" WHERE status='{filter_status}'"
-        query += " ORDER BY timestamp DESC"
+            conditions.append(f"o.status='{filter_status}'")
+        
+        if conditions:
+            query += " WHERE " + " AND ".join(conditions)
+            
+        query += " ORDER BY o.timestamp DESC"
         
         orders_df = pd.read_sql_query(query, conn)
         st.dataframe(orders_df, use_container_width=True)
@@ -156,27 +168,43 @@ def admin_panel():
         st.divider()
         st.subheader("❌ Cancel Order")
         
-        if 'cancel_msg' in st.session_state:
-            st.success(st.session_state.pop('cancel_msg'))
+        # Session state for form persistence/clearing
+        if 'c_oid' not in st.session_state: st.session_state.c_oid = ""
+        if 'c_reason' not in st.session_state: st.session_state.c_reason = ""
+        if 'c_pass' not in st.session_state: st.session_state.c_pass = ""
 
+        # Using a callback-like structure for form submission to handle clearing correctly
         with st.form("cancel_form"):
-            oid_to_cancel = st.text_input("Order ID to Cancel", key="c_oid")
-            reason = st.text_input("Reason for Cancellation", key="c_reason")
-            admin_pass = st.text_input("Admin Password Confirmation", type="password", key="c_pass")
+            oid_input = st.text_input("Order ID to Cancel", value=st.session_state.c_oid)
+            reason_input = st.text_input("Reason for Cancellation", value=st.session_state.c_reason)
+            pass_input = st.text_input("Admin Password Confirmation", type="password", value=st.session_state.c_pass)
             
-            if st.form_submit_button("Cancel Order"):
-                if not oid_to_cancel or not reason or not admin_pass:
+            submitted = st.form_submit_button("Cancel Order")
+            
+            if submitted:
+                if not oid_input or not reason_input or not pass_input:
                     st.error("All fields are mandatory")
+                    # Preserve inputs
+                    st.session_state.c_oid = oid_input
+                    st.session_state.c_reason = reason_input
+                    st.session_state.c_pass = pass_input
+                    st.rerun()
                 else:
-                    success, msg = st.session_state.user.cancel_order(oid_to_cancel, reason, admin_pass)
+                    success, msg = st.session_state.user.cancel_order(oid_input, reason_input, pass_input)
                     if success:
+                        st.success(msg)
+                        # Clear inputs only on success
                         st.session_state.c_oid = ""
                         st.session_state.c_reason = ""
                         st.session_state.c_pass = ""
-                        st.session_state.cancel_msg = "Order cancelled successfully"
                         st.rerun()
                     else:
-                        st.error("Cancellation failed. Please try again.")
+                        st.error(msg)
+                        # Preserve inputs on failure
+                        st.session_state.c_oid = oid_input
+                        st.session_state.c_reason = reason_input
+                        st.session_state.c_pass = pass_input
+                        st.rerun()
 
     elif nav == "Inventory":
         st.title("📦 Inventory Manager")
@@ -301,20 +329,51 @@ def pos_panel():
         with st.container():
             c1, c2 = st.columns([1, 2])
             country = c1.selectbox("Country", ["India (+91)", "USA (+1)", "UAE (+971)", "UK (+44)"])
-            mobile_input = c2.text_input("Mobile Number")
+            mobile_input = c2.text_input("Mobile Number", max_chars=10)
             valid_mobile = False
             cust_name = ""
+            
             if mobile_input:
-                patterns = {"India (+91)": r"^[6-9]\d{9}$", "USA (+1)": r"^\d{10}$", "UAE (+971)": r"^5\d{8}$", "UK (+44)": r"^7\d{9}$"}
-                if re.match(patterns[country], mobile_input):
-                    valid_mobile = True
+                # India validation
+                if country == "India (+91)":
+                    if re.match(r"^[6-9]\d{9}$", mobile_input):
+                        valid_mobile = True
+                    else:
+                        st.error("Invalid Mobile Number (10 digits, starts with 6-9)")
+                else:
+                    # Simple length check for other countries for now based on previous simple rules
+                    patterns = {"USA (+1)": r"^\d{10}$", "UAE (+971)": r"^5\d{8}$", "UK (+44)": r"^7\d{9}$"}
+                    if re.match(patterns[country], mobile_input):
+                        valid_mobile = True
+                    else:
+                        st.error("Invalid Mobile Number format")
+
+                if valid_mobile:
                     cust = conn.execute("SELECT name FROM customers WHERE mobile=?", (mobile_input,)).fetchone()
-                    cust_name = cust[0] if cust else st.text_input("New Customer Name")
-                    if not cust and cust_name and st.button("Register Customer"):
-                        conn.execute("INSERT INTO customers (mobile, name) VALUES (?,?)", (mobile_input, cust_name))
-                        conn.commit()
-                        st.success("Registered")
-                        st.rerun()
+                    if cust:
+                        cust_name = cust[0]
+                        st.success(f"Customer Found: {cust_name}")
+                    else:
+                        cust_name = st.text_input("New Customer Name (Mandatory)")
+                        if not cust_name:
+                            valid_mobile = False # Block if name is empty for new customer
+                        else:
+                            # Register on the fly button logic slightly adjusted
+                            if st.button("Register Customer"):
+                                conn.execute("INSERT INTO customers (mobile, name) VALUES (?,?)", (mobile_input, cust_name))
+                                conn.commit()
+                                st.success("Registered")
+                                st.rerun()
+            
+            # Block billing if new customer not registered yet
+            # Actually, the logic usually is: enter mobile, if not found, ask name. 
+            # If name entered, proceed. We can register implicitly or explicitly. 
+            # The prompt says "If mobile does NOT exist: Show input field: Customer Name. Name is mandatory".
+            # We will handle the implicit registration during order processing or explicit via button.
+            # For smoother flow, we'll keep the implicit registration logic if we can, or just force them to check.
+            # To stick to "Register Customer" flow from previous code:
+            if valid_mobile and not cust_name and not cust: 
+                 st.info("Please enter name and register to proceed.")
 
         col_prod, col_cart = st.columns([2, 1])
         
@@ -351,12 +410,12 @@ def pos_panel():
             cols = st.columns(3)
             for idx, p in enumerate(page_items):
                 with cols[idx % 3]:
-                    # Clean Card UI (No Images)
+                    # Clean Card UI (No Images, forced Black Text)
                     st.markdown(f"""
                     <div class="card">
-                        <h4 style="margin:0">{p['name']}</h4>
-                        <p style="color:#666; font-size:12px">{p['category_name']}</p>
-                        <h3 style="color:#333">₹{p['selling_price']}</h3>
+                        <h4>{p['name']}</h4>
+                        <p>{p['category_name']}</p>
+                        <h3>₹{p['selling_price']}</h3>
                         <p class="{'stock-green' if p['stock']>0 else 'stock-red'}">
                             {'IN STOCK: ' + str(p['stock']) if p['stock']>0 else 'OUT OF STOCK'}
                         </p>
@@ -370,7 +429,7 @@ def pos_panel():
                                     st.session_state.cart[p['id']]['qty'] += 1
                                     st.toast(f"Updated {p['name']}")
                                 else:
-                                    st.toast("Max stock")
+                                    st.toast("Max stock reached")
                             else:
                                 st.session_state.cart[p['id']] = p
                                 st.session_state.cart[p['id']]['qty'] = 1
@@ -386,12 +445,32 @@ def pos_panel():
             else:
                 total_val = 0
                 for pid, item in list(st.session_state.cart.items()):
-                    c1, c2, c3 = st.columns([3, 1, 1])
-                    c1.write(f"{item['name']} (x{item['qty']})")
-                    c2.write(f"₹{item['selling_price'] * item['qty']:.2f}")
-                    if c3.button("❌", key=f"del_{pid}"):
-                        del st.session_state.cart[pid]
-                        st.rerun()
+                    with st.container():
+                        st.write(f"**{item['name']}**")
+                        cc1, cc2, cc3 = st.columns([2, 1, 1])
+                        
+                        # Qty Control
+                        with cc1:
+                            new_qty = st.number_input(
+                                f"Qty", 
+                                min_value=1, 
+                                max_value=int(item['stock']), 
+                                value=int(item['qty']), 
+                                key=f"qty_{pid}",
+                                label_visibility="collapsed"
+                            )
+                            if new_qty != item['qty']:
+                                st.session_state.cart[pid]['qty'] = new_qty
+                                st.rerun()
+
+                        with cc2:
+                            st.write(f"₹{item['selling_price'] * item['qty']:.0f}")
+                        
+                        with cc3:
+                            if st.button("🗑️", key=f"del_{pid}"):
+                                del st.session_state.cart[pid]
+                                st.rerun()
+                                
                     total_val += item['selling_price'] * item['qty']
                 
                 gst_amt = 0
@@ -405,18 +484,50 @@ def pos_panel():
                 st.markdown(f"### Total: ₹{final_total:.2f}")
                 
                 pay_mode = st.radio("Payment Mode", ["Cash", "Card", "UPI"])
+                card_valid = True
+                
                 if pay_mode == "Card":
-                    st.text_input("Card Holder Name")
-                    st.text_input("Card No (16 digits)", max_chars=16)
+                    c_name = st.text_input("Card Holder Name")
+                    c_num = st.text_input("Card No (16 digits)", max_chars=16)
                     c1, c2 = st.columns(2)
-                    c1.text_input("Expiry (MM/YY)")
-                    c2.text_input("CVV", max_chars=3, type="password")
+                    c_exp = c1.text_input("Expiry (MM/YY)", max_chars=5)
+                    c_cvv = c2.text_input("CVV", max_chars=3, type="password")
+                    
+                    if c_name and c_num and c_exp and c_cvv:
+                        # Validation
+                        if not re.match(r"^[a-zA-Z\s]+$", c_name): 
+                            st.error("Invalid Name")
+                            card_valid = False
+                        if not re.match(r"^\d{16}$", c_num): 
+                            st.error("Invalid Card Number")
+                            card_valid = False
+                        if not re.match(r"^\d{3}$", c_cvv): 
+                            st.error("Invalid CVV")
+                            card_valid = False
+                        if not re.match(r"^(0[1-9]|1[0-2])\/\d{2}$", c_exp): 
+                            st.error("Invalid Expiry (MM/YY)")
+                            card_valid = False
+                    else:
+                        card_valid = False # Fields empty
+
                 elif pay_mode == "UPI":
                     if final_total > 0:
                         qr_path = generate_qr(settings.get("upi_id"), settings.get("store_name"), final_total)
                         st.image(qr_path, caption="Scan", width=200)
 
-                if st.button("✅ Complete Order", disabled=not valid_mobile or final_total==0):
+                # Complete Order Button
+                # Needs valid mobile (and if new, registered), valid cart, and valid payment
+                proceed_enabled = valid_mobile and final_total > 0 and cust_name
+                if pay_mode == "Card" and not card_valid:
+                    proceed_enabled = False
+
+                if st.button("✅ Complete Order", disabled=not proceed_enabled):
+                    # Double check if customer exists, if not create on the fly (for implicit case)
+                    check_cust = conn.execute("SELECT mobile FROM customers WHERE mobile=?", (mobile_input,)).fetchone()
+                    if not check_cust:
+                         conn.execute("INSERT INTO customers (mobile, name) VALUES (?,?)", (mobile_input, cust_name))
+                         conn.commit()
+                    
                     gst_config = {'enabled': settings.get("gst_enabled")=="True", 'percent': float(settings.get("gst_percent", 18))}
                     oid, tot, gst = st.session_state.user.process_order(mobile_input, st.session_state.cart, pay_mode, gst_config)
                     st.success(f"Order {oid} Successful!")
@@ -430,6 +541,7 @@ def pos_panel():
                     with open(pdf_file, "rb") as f:
                         st.download_button("📄 Download Bill", f, file_name=pdf_file)
                     st.session_state.cart = {}
+                    st.rerun()
 
     elif menu == "Profile":
         profile_section()
