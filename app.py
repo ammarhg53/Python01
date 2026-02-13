@@ -156,10 +156,13 @@ def admin_panel():
         st.divider()
         st.subheader("❌ Cancel Order")
         
+        if 'cancel_msg' in st.session_state:
+            st.success(st.session_state.pop('cancel_msg'))
+
         with st.form("cancel_form"):
-            oid_to_cancel = st.text_input("Order ID to Cancel")
-            reason = st.text_input("Reason for Cancellation")
-            admin_pass = st.text_input("Admin Password Confirmation", type="password")
+            oid_to_cancel = st.text_input("Order ID to Cancel", key="c_oid")
+            reason = st.text_input("Reason for Cancellation", key="c_reason")
+            admin_pass = st.text_input("Admin Password Confirmation", type="password", key="c_pass")
             
             if st.form_submit_button("Cancel Order"):
                 if not oid_to_cancel or not reason or not admin_pass:
@@ -167,10 +170,13 @@ def admin_panel():
                 else:
                     success, msg = st.session_state.user.cancel_order(oid_to_cancel, reason, admin_pass)
                     if success:
-                        st.success(msg)
+                        st.session_state.c_oid = ""
+                        st.session_state.c_reason = ""
+                        st.session_state.c_pass = ""
+                        st.session_state.cancel_msg = "Order cancelled successfully"
                         st.rerun()
                     else:
-                        st.error(msg)
+                        st.error("Cancellation failed. Please try again.")
 
     elif nav == "Inventory":
         st.title("📦 Inventory Manager")
@@ -195,6 +201,8 @@ def admin_panel():
             if st.button("Add Product"):
                 if not name.strip():
                     st.error("Product name cannot be empty")
+                elif re.match(r'^(item|product)', name, re.IGNORECASE):
+                    st.error("Generic names like 'Item' are not allowed.")
                 elif cost <= 0 or sell <= 0:
                     st.error("Price must be greater than 0")
                 elif stock < 0:
@@ -398,6 +406,7 @@ def pos_panel():
                 
                 pay_mode = st.radio("Payment Mode", ["Cash", "Card", "UPI"])
                 if pay_mode == "Card":
+                    st.text_input("Card Holder Name")
                     st.text_input("Card No (16 digits)", max_chars=16)
                     c1, c2 = st.columns(2)
                     c1.text_input("Expiry (MM/YY)")
