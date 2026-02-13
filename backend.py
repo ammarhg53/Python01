@@ -29,8 +29,7 @@ class DatabaseManager:
         conn = self.get_connection()
         cursor = conn.cursor()
         
-        # Check if we need to reset (Bad data detection)
-        # We check for generic names or missing categories which indicate bad state
+        # Check if we need to reset (Bad data detection or Missing Users)
         needs_reset = False
         try:
             # Check for tables existence
@@ -38,15 +37,22 @@ class DatabaseManager:
             if not cursor.fetchone():
                 needs_reset = True
             else:
-                # Check for bad product names
-                cursor.execute("SELECT count(*) FROM products WHERE name LIKE 'Item%' OR name LIKE 'Product%'")
-                if cursor.fetchone()[0] > 0:
+                # 1. Check if Users exist (CRITICAL FIX for Auth)
+                cursor.execute("SELECT count(*) FROM users")
+                if cursor.fetchone()[0] == 0:
                     needs_reset = True
+
+                # 2. Check for bad product names
+                if not needs_reset:
+                    cursor.execute("SELECT count(*) FROM products WHERE name LIKE 'Item%' OR name LIKE 'Product%'")
+                    if cursor.fetchone()[0] > 0:
+                        needs_reset = True
                 
-                # Check for incomplete categories
-                cursor.execute("SELECT count(*) FROM categories")
-                if cursor.fetchone()[0] < 5: 
-                    needs_reset = True
+                # 3. Check for incomplete categories
+                if not needs_reset:
+                    cursor.execute("SELECT count(*) FROM categories")
+                    if cursor.fetchone()[0] < 5: 
+                        needs_reset = True
         except sqlite3.Error:
             needs_reset = True
 
@@ -151,7 +157,8 @@ class DatabaseManager:
              conn = cursor
              cursor = conn.cursor()
 
-        # 1. Users
+        # 1. Users (Ensure Demo Credentials)
+        # Using SHA-256 as required
         admin_pass = hashlib.sha256("Admin@123".encode()).hexdigest()
         pos_pass = hashlib.sha256("Pos@123".encode()).hexdigest()
         
