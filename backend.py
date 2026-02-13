@@ -263,17 +263,40 @@ class User(ABC):
 
     @staticmethod
     def login(username, password):
+        # 1. Input Validation
+        username = username.strip() if username else ""
+        if not username or not password:
+            return None, "Username and password cannot be empty"
+
         db = DatabaseManager()
         conn = db.get_connection()
-        hashed = hashlib.sha256(password.encode()).hexdigest()
-        cursor = conn.execute("SELECT id, role, full_name FROM users WHERE username=? AND password_hash=?", (username, hashed))
+        cursor = conn.cursor()
+        
+        # 2. Username Check (Strict Case-Sensitive)
+        # Select username specifically to check case-sensitivity in Python
+        cursor.execute("SELECT id, role, full_name, password_hash, username FROM users WHERE username=?", (username,))
         row = cursor.fetchone()
         conn.close()
         
-        if row:
-            if row[1] == 'admin': return Admin(row[0], username)
-            elif row[1] == 'pos': return POSOperator(row[0], username)
-        return None
+        if not row:
+            return None, "User does not exist"
+        
+        # Strict case comparison (if SQLite returns case-insensitive match)
+        db_username = row[4]
+        if db_username != username:
+            return None, "User does not exist"
+        
+        # 3. Password Check
+        stored_hash = row[3]
+        input_hash = hashlib.sha256(password.encode()).hexdigest()
+        
+        if input_hash == stored_hash:
+            if row[1] == 'admin': 
+                return Admin(row[0], username), "Login successful"
+            elif row[1] == 'pos': 
+                return POSOperator(row[0], username), "Login successful"
+        
+        return None, "Incorrect password"
 
     def verify_password(self, password):
         conn = self.db.get_connection()
