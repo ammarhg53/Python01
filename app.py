@@ -40,15 +40,15 @@ def login():
         st.markdown("**Admin:** `admin` / `Admin@123`")
         st.markdown("**POS:** `pos1` / `Pos@123`")
     with c2:
-        username = st.text_input("Username")
+        username = st.text_input("Username").strip()
         password = st.text_input("Password", type="password")
         if st.button("Login"):
-            user = User.login(username, password)
+            user, error_msg = User.login(username, password)
             if user:
                 st.session_state.user = user
                 st.rerun()
             else:
-                st.error("Invalid credentials")
+                st.error(error_msg)
 
 # ==========================================
 # ADMIN PANEL
