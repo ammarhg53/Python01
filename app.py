@@ -121,7 +121,7 @@ def admin_panel():
     elif nav == "Inventory":
         st.title("📦 Inventory Manager")
         
-        tab1, tab2, tab3 = st.tabs(["View Products", "Add Product", "Manage Categories"])
+        tab1, tab2, tab3, tab4 = st.tabs(["View Products", "Add Product", "Restock", "Manage Categories"])
         
         with tab1:
             search_q = st.text_input("Search Product")
@@ -138,38 +138,70 @@ def admin_panel():
             name = st.text_input("Name")
             cats = pd.read_sql_query("SELECT * FROM categories", conn)
             cat_id = st.selectbox("Category", cats['id'], format_func=lambda x: cats[cats['id']==x]['name'].values[0])
-            cost = st.number_input("Cost Price", 1.0)
-            sell = st.number_input("Selling Price", 1.0)
-            stock = st.number_input("Stock", 0)
+            cost = st.number_input("Cost Price", 0.0)
+            sell = st.number_input("Selling Price", 0.0)
+            stock = st.number_input("Initial Stock", 0)
+            
             if st.button("Add Product"):
-                conn.execute("INSERT INTO products (name, category_id, selling_price, cost_price, stock, sales_count, image_path) VALUES (?, ?, ?, ?, ?, ?, ?)",
-                             (name, cat_id, sell, cost, stock, 0, "https://via.placeholder.com/150"))
-                conn.commit()
-                st.success("Added")
+                if not name.strip():
+                    st.error("Product name cannot be empty")
+                elif cost <= 0 or sell <= 0:
+                    st.error("Price must be greater than 0")
+                elif stock < 0:
+                    st.error("Stock cannot be negative")
+                else:
+                    # Default icon for all products
+                    default_img = "https://img.icons8.com/color/150/box--v1.png"
+                    conn.execute("INSERT INTO products (name, category_id, selling_price, cost_price, stock, sales_count, image_path) VALUES (?, ?, ?, ?, ?, ?, ?)",
+                                 (name.strip(), cat_id, sell, cost, stock, 0, default_img))
+                    conn.commit()
+                    st.success("Added")
 
         with tab3:
-            st.markdown("#### Category Management (Safe Delete)")
+            st.markdown("#### Restock Inventory")
+            prods = pd.read_sql_query("SELECT id, name, stock FROM products", conn)
+            pid = st.selectbox("Select Product", prods['id'], format_func=lambda x: f"{prods[prods['id']==x]['name'].values[0]} (Curr: {prods[prods['id']==x]['stock'].values[0]})")
+            qty = st.number_input("Quantity to Add", min_value=1, value=1)
+            
+            if st.button("Update Stock"):
+                if st.session_state.user.restock_product(pid, qty):
+                    st.success("Stock Updated Successfully")
+                    st.rerun()
+                else:
+                    st.error("Failed to update stock")
+
+        with tab4:
+            st.markdown("#### Category Management")
             cats = pd.read_sql_query("SELECT * FROM categories", conn)
             
             c1, c2 = st.columns(2)
             with c1:
                 new_cat = st.text_input("New Category Name")
                 if st.button("Add Category"):
-                    st.session_state.user.manage_category('add', new_cat)
-                    st.rerun()
+                    if not new_cat.strip():
+                        st.error("Category name cannot be empty")
+                    else:
+                        if st.session_state.user.manage_category('add', new_cat):
+                            st.success("Category Added")
+                            st.rerun()
+                        else:
+                            st.error("Error adding category (might already exist)")
             
             with c2:
-                target_cat = st.selectbox("Select Category", cats['name'])
+                target_cat = st.selectbox("Select Category to Rename", cats['name'])
                 if target_cat != 'Uncategorized':
-                    if st.button("Delete Category (Safe)"):
-                        st.session_state.user.manage_category('delete', target_cat)
-                        st.success(f"Deleted {target_cat}. Products moved to 'Uncategorized'.")
-                        st.rerun()
-                    
                     rename_val = st.text_input("Rename to")
                     if st.button("Rename"):
-                        st.session_state.user.manage_category('rename', target_cat, rename_val)
-                        st.rerun()
+                        if not rename_val.strip():
+                            st.error("New name cannot be empty")
+                        else:
+                            if st.session_state.user.manage_category('rename', target_cat, rename_val):
+                                st.success("Renamed Successfully")
+                                st.rerun()
+                            else:
+                                st.error("Rename failed")
+                else:
+                    st.info("Uncategorized cannot be modified")
 
     elif nav == "Settings":
         st.title("⚙️ Store Settings")
@@ -307,6 +339,8 @@ def pos_panel():
             cols = st.columns(3)
             for idx, p in enumerate(page_items):
                 with cols[idx % 3]:
+                    # Use standard icon if image not available, but Seed uses specific URL.
+                    # UI cleanup: removed Profit/Sales display as requested.
                     st.markdown(f"""
                     <div class="card">
                         <img src="{p['image_path']}" width="80" style="border-radius: 5px"><br>
@@ -318,11 +352,6 @@ def pos_panel():
                         </span>
                     </div>
                     """, unsafe_allow_html=True)
-                    
-                    # Details Popup
-                    with st.expander("Details"):
-                        st.write(f"Profit: ₹{p['selling_price'] - p['cost_price']:.2f}")
-                        st.write(f"Total Sales: {p['sales_count']}")
                     
                     if p['stock'] > 0:
                         if st.button("Add 🛒", key=f"add_{p['id']}"):
