@@ -141,30 +141,40 @@ class DatabaseManager:
             'Electronics': [('USB C Cable', 350, 150), ('Wireless Mouse', 600, 400), ('Earphones', 400, 250)],
             'Household': [('Vim Dishwash Gel', 110, 90), ('Surf Excel 1kg', 140, 120), ('Harpic Cleaner', 180, 150)]
         }
+        
+        # Generic realistic fillers
+        fillers = ['Family Pack', 'Economy Pack', 'Premium', 'Standard', 'Mini']
 
-        # Insert 50+ Products
+        # Insert Products
         count = 0
         for cat, items in products_data.items():
             cid = cat_map[cat]
             for name, sell, cost in items:
                 stock = random.randint(20, 100)
-                # Ensure non-zero sales count for analytics
-                sales_count = random.randint(50, 500) 
+                sales_count = random.randint(50, 500)
+                # Consistent default icon
+                image_path = "https://img.icons8.com/color/150/box--v1.png"
                 cursor.execute('''INSERT INTO products (name, category_id, selling_price, cost_price, stock, sales_count, image_path) 
                                   VALUES (?, ?, ?, ?, ?, ?, ?)''',
-                               (name, cid, float(sell), float(cost), stock, sales_count, "https://via.placeholder.com/150"))
+                               (name, cid, float(sell), float(cost), stock, sales_count, image_path))
                 count += 1
         
-        # Fill remaining to reach 50 if needed (using generic for fillers)
+        # Fill remaining to reach 55
         while count < 55:
             cat = random.choice(list(products_data.keys()))
             cid = cat_map[cat]
-            cost = random.randint(50, 500)
+            base_item = random.choice(products_data[cat])
+            filler_type = random.choice(fillers)
+            
+            name = f"{base_item[0]} ({filler_type})"
+            cost = base_item[2] * random.uniform(0.8, 1.5)
             sell = cost * random.uniform(1.2, 1.5)
             sales_count = random.randint(50, 200)
+            image_path = "https://img.icons8.com/color/150/box--v1.png"
+
             cursor.execute('''INSERT INTO products (name, category_id, selling_price, cost_price, stock, sales_count, image_path) 
                               VALUES (?, ?, ?, ?, ?, ?, ?)''',
-                           (f"{cat} Item {count}", cid, round(sell, 2), cost, 50, sales_count, "https://via.placeholder.com/150"))
+                           (name, cid, round(sell, 2), round(cost, 2), 50, sales_count, image_path))
             count += 1
 
         # Customers (50 records)
@@ -336,23 +346,34 @@ class Admin(User):
     def manage_category(self, action, name, new_name=None):
         conn = self.db.get_connection()
         try:
+            # Validation: Empty strings not allowed
+            if not name or not name.strip():
+                return False
+            
             if action == 'add':
-                conn.execute("INSERT INTO categories (name) VALUES (?)", (name,))
+                conn.execute("INSERT INTO categories (name) VALUES (?)", (name.strip(),))
             elif action == 'rename':
-                conn.execute("UPDATE categories SET name=? WHERE name=?", (new_name, name))
-            elif action == 'delete':
-                # Safe Delete: Move products to Uncategorized first
-                cat_id = conn.execute("SELECT id FROM categories WHERE name=?", (name,)).fetchone()
-                uncat_id = conn.execute("SELECT id FROM categories WHERE name='Uncategorized'").fetchone()
-                
-                if cat_id and uncat_id:
-                    # Move products
-                    conn.execute("UPDATE products SET category_id=? WHERE category_id=?", (uncat_id[0], cat_id[0]))
-                    # Delete category
-                    conn.execute("DELETE FROM categories WHERE id=?", (cat_id[0],))
+                if not new_name or not new_name.strip():
+                    return False
+                conn.execute("UPDATE categories SET name=? WHERE name=?", (new_name.strip(), name))
+            # Delete action removed completely per requirements
+            
             conn.commit()
             return True
         except Exception as e:
+            return False
+        finally:
+            conn.close()
+
+    def restock_product(self, product_id, qty):
+        if qty <= 0:
+            return False
+        conn = self.db.get_connection()
+        try:
+            conn.execute("UPDATE products SET stock = stock + ? WHERE id = ?", (qty, product_id))
+            conn.commit()
+            return True
+        except Exception:
             return False
         finally:
             conn.close()
