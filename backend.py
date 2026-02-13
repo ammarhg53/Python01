@@ -670,6 +670,14 @@ def generate_pdf(invoice_data):
     pdf.set_font("Arial", 'B', 12)
     pdf.cell(150, 10, "Total", 0)
     pdf.cell(40, 10, f"{invoice_data['total']:.2f}", 0, 1)
-    filename = f"{invoice_data['customer_name']}_{invoice_data['customer_mobile']}_{int(datetime.datetime.now().timestamp())}.pdf"
+    
+    # FORMAT: <CustomerName>_<BillNumber>_<Date>.pdf
+    # Sanitize customer name to remove spaces or bad chars for filename
+    safe_name = str(invoice_data['customer_name']).replace(" ", "_")
+    safe_id = str(invoice_data['id'])
+    # Using date.today() for YYYY-MM-DD format
+    date_str = datetime.date.today().strftime("%Y-%m-%d")
+    
+    filename = f"{safe_name}_{safe_id}_{date_str}.pdf"
     pdf.output(filename)
     return filename
