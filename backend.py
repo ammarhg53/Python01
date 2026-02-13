@@ -28,6 +28,48 @@ class DatabaseManager:
     def init_db(self):
         conn = self.get_connection()
         cursor = conn.cursor()
+        
+        # Check if we need to reset (Bad data detection)
+        # We check for generic names or missing categories which indicate bad state
+        needs_reset = False
+        try:
+            # Check for tables existence
+            cursor.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='products'")
+            if not cursor.fetchone():
+                needs_reset = True
+            else:
+                # Check for bad product names
+                cursor.execute("SELECT count(*) FROM products WHERE name LIKE 'Item%' OR name LIKE 'Product%'")
+                if cursor.fetchone()[0] > 0:
+                    needs_reset = True
+                
+                # Check for incomplete categories
+                cursor.execute("SELECT count(*) FROM categories")
+                if cursor.fetchone()[0] < 5: 
+                    needs_reset = True
+        except sqlite3.Error:
+            needs_reset = True
+
+        if needs_reset:
+            self.reset_database(conn)
+        else:
+            self.create_tables(conn)
+            
+        conn.close()
+
+    def reset_database(self, conn):
+        """Drops all tables and rebuilds them with fresh, clean seed data."""
+        cursor = conn.cursor()
+        tables = ['order_items', 'orders', 'products', 'categories', 'customers', 'users', 'settings']
+        for table in tables:
+            cursor.execute(f"DROP TABLE IF EXISTS {table}")
+        conn.commit()
+        
+        self.create_tables(conn)
+        self.seed_data(conn)
+
+    def create_tables(self, conn):
+        cursor = conn.cursor()
         cursor.execute("PRAGMA foreign_keys = ON")
 
         # 1. Users
@@ -46,7 +88,7 @@ class DatabaseManager:
             name TEXT UNIQUE
         )''')
 
-        # 3. Products (REMOVED image_path)
+        # 3. Products
         cursor.execute('''CREATE TABLE IF NOT EXISTS products (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             name TEXT,
@@ -103,31 +145,13 @@ class DatabaseManager:
 
         conn.commit()
 
-        # --- FIX: Cleanup generic names (Product Name Issue) ---
-        cursor.execute("DELETE FROM products WHERE name LIKE 'Item%' OR name LIKE 'Product%'")
-        conn.commit()
-        
-        # Seed Data if empty
-        cursor.execute("SELECT count(*) FROM users")
-        if cursor.fetchone()[0] == 0:
-            self.seed_data(cursor, conn)
-        else:
-            # --- FIX: Ensure Frozen products exist (Category Visibility Issue) ---
-            frozen_cat = cursor.execute("SELECT id FROM categories WHERE name='Frozen'").fetchone()
-            if frozen_cat:
-                fid = frozen_cat[0]
-                has_frozen = cursor.execute("SELECT count(*) FROM products WHERE category_id=?", (fid,)).fetchone()[0]
-                if has_frozen == 0:
-                    items = [('McCain French Fries 400g', 125, 95), ('Safal Green Peas 500g', 60, 45), ('Amul Vanilla Ice Cream 1L', 150, 115)]
-                    for name, sell, cost in items:
-                        cursor.execute("INSERT INTO products (name, category_id, selling_price, cost_price, stock, sales_count) VALUES (?, ?, ?, ?, ?, ?)", 
-                                       (name, fid, sell, cost, 50, 10))
-                    conn.commit()
-        
-        conn.close()
-
     def seed_data(self, cursor, conn):
-        # Users
+        """Strict clean seeding with realistic data."""
+        if isinstance(cursor, sqlite3.Connection):
+             conn = cursor
+             cursor = conn.cursor()
+
+        # 1. Users
         admin_pass = hashlib.sha256("Admin@123".encode()).hexdigest()
         pos_pass = hashlib.sha256("Pos@123".encode()).hexdigest()
         
@@ -136,7 +160,7 @@ class DatabaseManager:
         cursor.execute("INSERT INTO users (full_name, username, password_hash, role) VALUES (?, ?, ?, ?)",
                        ("POS Operator 1", "pos1", pos_pass, "pos"))
         
-        # Realistic Categories
+        # 2. Categories
         categories = ['Snacks', 'Beverages', 'Grocery', 'Dairy', 'Bakery', 
                       'Frozen', 'Personal Care', 'Stationery', 'Electronics', 'Household']
         cat_map = {}
@@ -144,7 +168,7 @@ class DatabaseManager:
             cursor.execute("INSERT INTO categories (name) VALUES (?)", (cat,))
             cat_map[cat] = cursor.lastrowid
         
-        # Realistic Products Data (NO GENERIC NAMES)
+        # 3. Products (Realistic Names ONLY)
         products_data = {
             'Snacks': [('Lays Classic Salted', 20, 15), ('Doritos Nacho Cheese', 30, 22), ('Pringles Sour Cream', 110, 85), ('Kurkure Masala Munch', 20, 14), ('Haldirams Bhujia', 45, 35)],
             'Beverages': [('Coca Cola 750ml', 45, 35), ('Pepsi 500ml', 40, 30), ('Red Bull Energy Drink', 125, 95), ('Tropicana Mixed Fruit', 110, 80), ('Kinley Water 1L', 20, 12)],
@@ -158,23 +182,27 @@ class DatabaseManager:
             'Household': [('Vim Dishwash Gel 500ml', 110, 90), ('Surf Excel 1kg', 140, 120), ('Harpic Toilet Cleaner', 180, 150), ('Duracell AA Batteries (4)', 160, 110)]
         }
 
-        # Insert Products (No images)
+        all_products = [] # List of (id, selling_price, cost_price)
+
         for cat, items in products_data.items():
             cid = cat_map[cat]
             for name, sell, cost in items:
                 stock = random.randint(20, 100)
-                sales_count = random.randint(5, 50)
+                # Sales count starts at 0, updated by order seeding
                 cursor.execute('''INSERT INTO products (name, category_id, selling_price, cost_price, stock, sales_count) 
-                                  VALUES (?, ?, ?, ?, ?, ?)''',
-                               (name, cid, float(sell), float(cost), stock, sales_count))
+                                  VALUES (?, ?, ?, ?, ?, 0)''',
+                               (name, cid, float(sell), float(cost), stock))
+                all_products.append({'id': cursor.lastrowid, 'sell': float(sell), 'cost': float(cost)})
 
-        # Customers (50 records)
+        # 4. Customers (50 records)
+        customer_mobiles = []
         for i in range(1, 51):
             mobile = f"98765432{i:02d}"
             cursor.execute("INSERT INTO customers (mobile, name, total_spent, total_visits) VALUES (?, ?, ?, ?)", 
                            (mobile, f"Customer {i}", 0, 0))
+            customer_mobiles.append(mobile)
 
-        # Settings
+        # 5. Settings
         settings = {
             'store_name': 'SmartInventory Enterprise',
             'gst_enabled': 'True',
@@ -184,46 +212,61 @@ class DatabaseManager:
         for k, v in settings.items():
             cursor.execute("INSERT OR IGNORE INTO settings (key, value) VALUES (?, ?)", (k, v))
 
-        # Orders (History for Analytics - Past 60 days, 50+ orders)
+        # 6. Orders (History for Analytics - Past 60 days, 50 orders)
         base_date = datetime.datetime.now()
         payment_modes = ['CASH', 'UPI', 'CARD', 'UPI', 'CASH']
         
-        for i in range(65): 
-            # Randomize date to simulate busy days
+        for i in range(50): 
+            # Randomize date
             days_ago = random.randint(0, 60)
-            
-            # Randomize hour to simulate peak hours (more orders in evening)
             hour = random.choice([10, 11, 14, 15, 16, 17, 18, 18, 19, 19, 20])
             minute = random.randint(0, 59)
-            
             order_date = (base_date - datetime.timedelta(days=days_ago)).replace(hour=hour, minute=minute)
             
             order_id = f"ORD{random.randint(10000,99999)}"
-            amt = random.randint(200, 3000)
-            
-            cust_mobile = f"98765432{random.randint(1,50):02d}"
+            cust_mobile = random.choice(customer_mobiles)
             pay_mode = random.choice(payment_modes)
             
-            # 10% Cancellation Rate
+            # Select random items for this order
+            num_items = random.randint(1, 4)
+            selected_items = random.sample(all_products, num_items)
+            
+            total_sell = 0
+            gst_rate = 0.18
+            
+            # 15% Cancellation Rate
             status = 'active'
             reason = None
-            if random.random() < 0.1:
+            if random.random() < 0.15:
                 status = 'cancelled'
                 reason = "Customer changed mind"
+
+            # Insert Order Items
+            for item in selected_items:
+                qty = random.randint(1, 3)
+                price = item['sell']
+                cost = item['cost']
+                total_sell += price * qty
+                
+                cursor.execute("INSERT INTO order_items (order_id, product_id, quantity, price, cost) VALUES (?, ?, ?, ?, ?)",
+                               (order_id, item['id'], qty, price, cost))
+                
+                # Update product stock/sales only if active
+                if status == 'active':
+                    cursor.execute("UPDATE products SET stock = stock - ?, sales_count = sales_count + ? WHERE id=?", 
+                                   (qty, qty, item['id']))
+
+            total_amount = total_sell * (1 + gst_rate)
+            gst_amount = total_sell * gst_rate
             
             cursor.execute('''INSERT INTO orders (order_id, customer_mobile, operator_username, total_amount, gst_amount, payment_mode, timestamp, status, cancellation_reason)
                               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)''',
-                           (order_id, cust_mobile, "pos1", amt, amt*0.18, pay_mode, order_date, status, reason))
+                           (order_id, cust_mobile, "pos1", total_amount, gst_amount, pay_mode, order_date, status, reason))
             
             if status == 'active':
-                cursor.execute("UPDATE customers SET total_spent = total_spent + ?, total_visits = total_visits + 1 WHERE mobile=?", (amt, cust_mobile))
+                cursor.execute("UPDATE customers SET total_spent = total_spent + ?, total_visits = total_visits + 1 WHERE mobile=?", (total_amount, cust_mobile))
             else:
                 cursor.execute("UPDATE customers SET cancelled_orders = cancelled_orders + 1 WHERE mobile=?", (cust_mobile,))
-
-            # Insert dummy item logic for margin
-            cost = amt * 0.75
-            cursor.execute("INSERT INTO order_items (order_id, product_id, quantity, price, cost) VALUES (?, ?, ?, ?, ?)",
-                           (order_id, random.randint(1,40), random.randint(1,3), amt, cost))
 
         conn.commit()
 
@@ -290,7 +333,6 @@ class User(ABC):
         cursor = conn.cursor()
         
         # 2. Username Check (Strict Case-Sensitive)
-        # Select username specifically to check case-sensitivity in Python
         cursor.execute("SELECT id, role, full_name, password_hash, username FROM users WHERE username=?", (username,))
         row = cursor.fetchone()
         conn.close()
@@ -298,7 +340,6 @@ class User(ABC):
         if not row:
             return None, "User does not exist"
         
-        # Strict case comparison (if SQLite returns case-insensitive match)
         db_username = row[4]
         if db_username != username:
             return None, "User does not exist"
@@ -405,9 +446,7 @@ class Admin(User):
             # 3. Update Status
             conn.execute("UPDATE orders SET status='cancelled', cancellation_reason=? WHERE order_id=?", (reason, order_id))
             
-            # 4. Update Customer Stats (Reverse the spend/visit)
-            # Note: We do not typically reverse stock in this academic simplified model unless explicitly requested, 
-            # but we must reverse customer financial stats for analytics consistency.
+            # 4. Update Customer Stats
             order_data = conn.execute("SELECT customer_mobile, total_amount FROM orders WHERE order_id=?", (order_id,)).fetchone()
             if order_data:
                 mob, amt = order_data
@@ -450,7 +489,7 @@ class POSOperator(User):
         return order_id, final_amt, gst_amt
 
 # ==========================================
-# 4. ANALYTICS ENGINE (EXPANDED)
+# 4. ANALYTICS ENGINE
 # ==========================================
 class AnalyticsEngine:
     def __init__(self):
@@ -469,7 +508,6 @@ class AnalyticsEngine:
     def get_financials_extended(self, start_date, end_date):
         conn = self.db.get_connection()
         
-        # Filter only ACTIVE orders
         rev_query = f"SELECT SUM(total_amount) FROM orders WHERE status='active' AND date(timestamp) BETWEEN '{start_date}' AND '{end_date}'"
         revenue = conn.execute(rev_query).fetchone()[0] or 0
         
@@ -489,11 +527,9 @@ class AnalyticsEngine:
         gross_profit = revenue - total_cost
         gross_margin = (gross_profit / revenue * 100) if revenue > 0 else 0
 
-        # Turnover (Sales Count from products / Stock + Sales approximation)
         turnover_query = "SELECT SUM(sales_count) FROM products"
         turnover = conn.execute(turnover_query).fetchone()[0] or 0
         
-        # Retention
         total_customers = conn.execute("SELECT COUNT(*) FROM customers").fetchone()[0]
         returning_cust = conn.execute("SELECT COUNT(*) FROM customers WHERE total_visits > 1").fetchone()[0]
         retention_rate = (returning_cust / total_customers * 100) if total_customers > 0 else 0
@@ -527,7 +563,6 @@ class AnalyticsEngine:
 
     def get_hourly_trends(self):
         conn = self.db.get_connection()
-        # Extract hour from timestamp
         query = """
             SELECT strftime('%H', timestamp) as hour, COUNT(*) as orders 
             FROM orders WHERE status='active' 
@@ -537,7 +572,6 @@ class AnalyticsEngine:
     
     def get_daily_trends(self):
         conn = self.db.get_connection()
-        # Extract day of week (0=Sunday, 6=Saturday in SQLite strftime %w)
         query = """
             SELECT 
                 CASE cast(strftime('%w', timestamp) as integer)
@@ -563,7 +597,7 @@ class AnalyticsEngine:
         X = df['idx'].values
         y = df['sales'].values
         
-        degree = 1 if mode == 'Linear' else 3 # Cubic for "Optimized/Smoothed"
+        degree = 1 if mode == 'Linear' else 3
         
         coeffs = np.polyfit(X, y, degree)
         poly = np.poly1d(coeffs)
