@@ -72,7 +72,10 @@ class DatabaseManager:
         conn.commit()
         
         self.create_tables(conn)
-        self.seed_data(conn)
+        
+        # Fix: Create a new cursor and pass both cursor and conn to seed_data
+        cursor = conn.cursor()
+        self.seed_data(cursor, conn)
 
     def create_tables(self, conn):
         cursor = conn.cursor()
