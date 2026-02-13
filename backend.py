@@ -102,11 +102,27 @@ class DatabaseManager:
         )''')
 
         conn.commit()
+
+        # --- FIX: Cleanup generic names (Product Name Issue) ---
+        cursor.execute("DELETE FROM products WHERE name LIKE 'Item%' OR name LIKE 'Product%'")
+        conn.commit()
         
         # Seed Data if empty
         cursor.execute("SELECT count(*) FROM users")
         if cursor.fetchone()[0] == 0:
             self.seed_data(cursor, conn)
+        else:
+            # --- FIX: Ensure Frozen products exist (Category Visibility Issue) ---
+            frozen_cat = cursor.execute("SELECT id FROM categories WHERE name='Frozen'").fetchone()
+            if frozen_cat:
+                fid = frozen_cat[0]
+                has_frozen = cursor.execute("SELECT count(*) FROM products WHERE category_id=?", (fid,)).fetchone()[0]
+                if has_frozen == 0:
+                    items = [('McCain French Fries 400g', 125, 95), ('Safal Green Peas 500g', 60, 45), ('Amul Vanilla Ice Cream 1L', 150, 115)]
+                    for name, sell, cost in items:
+                        cursor.execute("INSERT INTO products (name, category_id, selling_price, cost_price, stock, sales_count) VALUES (?, ?, ?, ?, ?, ?)", 
+                                       (name, fid, sell, cost, 50, 10))
+                    conn.commit()
         
         conn.close()
 
@@ -135,6 +151,7 @@ class DatabaseManager:
             'Grocery': [('India Gate Basmati Rice 1kg', 120, 95), ('Tata Salt 1kg', 25, 18), ('Aashirvaad Atta 5kg', 240, 210), ('Toor Dal 1kg', 160, 130), ('Fortune Oil 1L', 145, 125)],
             'Dairy': [('Amul Butter 100g', 56, 48), ('Mother Dairy Milk 1L', 66, 60), ('Paneer 200g', 85, 70), ('Amul Cheese Slices', 140, 115), ('Curd 400g', 40, 32)],
             'Bakery': [('Britannia White Bread', 45, 38), ('Chocolate Muffin', 60, 40), ('Butter Croissant', 80, 50), ('Fruit Cake', 150, 110)],
+            'Frozen': [('McCain French Fries 400g', 125, 95), ('Safal Green Peas 500g', 60, 45), ('Amul Vanilla Ice Cream 1L', 150, 115)],
             'Personal Care': [('Dove Shampoo 180ml', 160, 120), ('Colgate Toothpaste', 90, 70), ('Nivea Body Lotion', 250, 190), ('Dettol Handwash', 85, 65)],
             'Stationery': [('Classmate Notebook A4', 60, 40), ('Parker Pen Vector', 250, 180), ('Fevicol 100g', 50, 35), ('A4 Paper Bundle', 300, 240)],
             'Electronics': [('USB C Cable 1m', 350, 150), ('Wireless Mouse Logitech', 600, 400), ('Sony Earphones', 800, 550), ('SanDisk 32GB Pen Drive', 450, 300)],
