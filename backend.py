@@ -121,21 +121,51 @@ class DatabaseManager:
         cursor.execute("INSERT INTO users (full_name, username, password_hash, role) VALUES (?, ?, ?, ?)",
                        ("POS Operator 1", "pos1", pos_pass, "pos"))
         
-        # Categories
-        categories = ['Electronics', 'Groceries', 'Clothing', 'Stationery', 'Home Decor']
+        # Realistic Categories
+        categories = ['Uncategorized', 'Snacks', 'Beverages', 'Grocery', 'Dairy', 'Bakery', 
+                      'Frozen', 'Personal Care', 'Stationery', 'Electronics', 'Household']
+        cat_map = {}
         for cat in categories:
             cursor.execute("INSERT INTO categories (name) VALUES (?)", (cat,))
+            cat_map[cat] = cursor.lastrowid
         
-        # Products (50 records)
-        product_names = [f"Item {i}" for i in range(1, 51)]
-        for i, name in enumerate(product_names, 1):
-            cat_id = random.randint(1, 5)
-            cost = random.randint(100, 1000)
-            selling = cost * random.uniform(1.2, 1.8) # 20-80% margin
-            stock = random.randint(0, 50)
-            cursor.execute('''INSERT INTO products (name, category_id, selling_price, cost_price, stock, image_path) 
-                              VALUES (?, ?, ?, ?, ?, ?)''',
-                           (name, cat_id, round(selling, 2), cost, stock, "https://via.placeholder.com/150"))
+        # Realistic Products Data
+        products_data = {
+            'Snacks': [('Lays Classic Salted', 20, 15), ('Doritos Nacho Cheese', 30, 22), ('Pringles Sour Cream', 110, 85), ('Kurkure Masala Munch', 20, 14)],
+            'Beverages': [('Coca Cola 750ml', 45, 35), ('Pepsi 500ml', 40, 30), ('Red Bull Energy Drink', 125, 95), ('Tropicana Mixed Fruit', 110, 80)],
+            'Grocery': [('India Gate Basmati Rice 1kg', 120, 95), ('Tata Salt 1kg', 25, 18), ('Aashirvaad Atta 5kg', 240, 210), ('Toor Dal 1kg', 160, 130)],
+            'Dairy': [('Amul Butter 100g', 56, 48), ('Mother Dairy Milk 1L', 66, 60), ('Paneer 200g', 85, 70), ('Amul Cheese Slices', 140, 115)],
+            'Bakery': [('Britannia White Bread', 45, 38), ('Chocolate Muffin', 60, 40), ('Butter Croissant', 80, 50)],
+            'Personal Care': [('Dove Shampoo 180ml', 160, 120), ('Colgate Toothpaste', 90, 70), ('Nivea Body Lotion', 250, 190)],
+            'Stationery': [('Classmate Notebook', 60, 40), ('Parker Pen', 250, 180), ('Fevicol 100g', 50, 35)],
+            'Electronics': [('USB C Cable', 350, 150), ('Wireless Mouse', 600, 400), ('Earphones', 400, 250)],
+            'Household': [('Vim Dishwash Gel', 110, 90), ('Surf Excel 1kg', 140, 120), ('Harpic Cleaner', 180, 150)]
+        }
+
+        # Insert 50+ Products
+        count = 0
+        for cat, items in products_data.items():
+            cid = cat_map[cat]
+            for name, sell, cost in items:
+                stock = random.randint(20, 100)
+                # Ensure non-zero sales count for analytics
+                sales_count = random.randint(50, 500) 
+                cursor.execute('''INSERT INTO products (name, category_id, selling_price, cost_price, stock, sales_count, image_path) 
+                                  VALUES (?, ?, ?, ?, ?, ?, ?)''',
+                               (name, cid, float(sell), float(cost), stock, sales_count, "https://via.placeholder.com/150"))
+                count += 1
+        
+        # Fill remaining to reach 50 if needed (using generic for fillers)
+        while count < 55:
+            cat = random.choice(list(products_data.keys()))
+            cid = cat_map[cat]
+            cost = random.randint(50, 500)
+            sell = cost * random.uniform(1.2, 1.5)
+            sales_count = random.randint(50, 200)
+            cursor.execute('''INSERT INTO products (name, category_id, selling_price, cost_price, stock, sales_count, image_path) 
+                              VALUES (?, ?, ?, ?, ?, ?, ?)''',
+                           (f"{cat} Item {count}", cid, round(sell, 2), cost, 50, sales_count, "https://via.placeholder.com/150"))
+            count += 1
 
         # Customers (50 records)
         for i in range(1, 51):
@@ -153,9 +183,9 @@ class DatabaseManager:
         for k, v in settings.items():
             cursor.execute("INSERT OR IGNORE INTO settings (key, value) VALUES (?, ?)", (k, v))
 
-        # Orders (History for Analytics)
+        # Orders (History for Analytics - Past 60 days)
         base_date = datetime.datetime.now()
-        for i in range(60): # Past 60 orders
+        for i in range(60): 
             days_ago = random.randint(0, 30)
             order_date = base_date - datetime.timedelta(days=days_ago)
             order_id = f"ORD{random.randint(10000,99999)}"
@@ -212,8 +242,6 @@ class SearchAlgorithms:
             
             if mid_val.startswith(val):
                 idx = mid
-                # We found a match, but there might be more. 
-                # Binary search finds one, we need to expand to find neighbors in a range.
                 break 
             elif mid_val < val:
                 low = mid + 1
@@ -305,6 +333,30 @@ class Admin(User):
         finally:
             conn.close()
 
+    def manage_category(self, action, name, new_name=None):
+        conn = self.db.get_connection()
+        try:
+            if action == 'add':
+                conn.execute("INSERT INTO categories (name) VALUES (?)", (name,))
+            elif action == 'rename':
+                conn.execute("UPDATE categories SET name=? WHERE name=?", (new_name, name))
+            elif action == 'delete':
+                # Safe Delete: Move products to Uncategorized first
+                cat_id = conn.execute("SELECT id FROM categories WHERE name=?", (name,)).fetchone()
+                uncat_id = conn.execute("SELECT id FROM categories WHERE name='Uncategorized'").fetchone()
+                
+                if cat_id and uncat_id:
+                    # Move products
+                    conn.execute("UPDATE products SET category_id=? WHERE category_id=?", (uncat_id[0], cat_id[0]))
+                    # Delete category
+                    conn.execute("DELETE FROM categories WHERE id=?", (cat_id[0],))
+            conn.commit()
+            return True
+        except Exception as e:
+            return False
+        finally:
+            conn.close()
+
 class POSOperator(User):
     def __init__(self, user_id, username):
         super().__init__(user_id, username, 'pos')
@@ -330,6 +382,7 @@ class POSOperator(User):
         for pid, item in cart.items():
             conn.execute("INSERT INTO order_items (order_id, product_id, quantity, price, cost) VALUES (?, ?, ?, ?, ?)",
                          (order_id, pid, item['qty'], item['selling_price'], item['cost_price']))
+            # Update stock and sales_count
             conn.execute("UPDATE products SET stock = stock - ?, sales_count = sales_count + ? WHERE id=?",
                          (item['qty'], item['qty'], pid))
 
@@ -342,7 +395,7 @@ class POSOperator(User):
         return order_id, final_amt, gst_amt
 
 # ==========================================
-# 4. ANALYTICS ENGINE
+# 4. ANALYTICS ENGINE (EXPANDED)
 # ==========================================
 class AnalyticsEngine:
     def __init__(self):
@@ -358,27 +411,71 @@ class AnalyticsEngine:
         """
         return pd.read_sql_query(query, conn)
 
-    def get_financials(self, start_date, end_date):
+    def get_financials_extended(self, start_date, end_date):
         conn = self.db.get_connection()
-        # Revenue
+        
+        # 1. Revenue (Total Sales)
         rev_query = f"SELECT SUM(total_amount) FROM orders WHERE status='active' AND date(timestamp) BETWEEN '{start_date}' AND '{end_date}'"
         revenue = conn.execute(rev_query).fetchone()[0] or 0
         
-        # Cost
+        # 2. Total Orders
+        ord_query = f"SELECT COUNT(*) FROM orders WHERE status='active' AND date(timestamp) BETWEEN '{start_date}' AND '{end_date}'"
+        total_orders = conn.execute(ord_query).fetchone()[0] or 0
+        
+        # 3. Avg Order Value
+        aov = revenue / total_orders if total_orders > 0 else 0
+
+        # 4. Total Cost
         cost_query = f"""
             SELECT SUM(oi.cost * oi.quantity) 
             FROM order_items oi 
             JOIN orders o ON oi.order_id = o.order_id 
             WHERE o.status='active' AND date(o.timestamp) BETWEEN '{start_date}' AND '{end_date}'
         """
-        cost = conn.execute(cost_query).fetchone()[0] or 0
+        total_cost = conn.execute(cost_query).fetchone()[0] or 0
         
-        gross_profit = revenue - cost
-        margin = (gross_profit / revenue * 100) if revenue > 0 else 0
+        # 5. Gross Profit
+        gross_profit = revenue - total_cost
         
-        return revenue, cost, gross_profit, margin
+        # 6. Gross Margin
+        gross_margin = (gross_profit / revenue * 100) if revenue > 0 else 0
+
+        # 8. Inventory Turnover (Simplified: Total Units Sold / Avg Stock approximation)
+        # Using Total Sales Count from products table as a proxy for turnover velocity
+        turnover_query = "SELECT SUM(sales_count) FROM products"
+        turnover = conn.execute(turnover_query).fetchone()[0] or 0
+        
+        # 9. Customer Retention Rate
+        total_customers = conn.execute("SELECT COUNT(*) FROM customers").fetchone()[0]
+        returning_cust = conn.execute("SELECT COUNT(*) FROM customers WHERE total_visits > 1").fetchone()[0]
+        retention_rate = (returning_cust / total_customers * 100) if total_customers > 0 else 0
+
+        conn.close()
+        
+        return {
+            'revenue': revenue,
+            'total_orders': total_orders,
+            'aov': aov,
+            'total_cost': total_cost,
+            'gross_profit': gross_profit,
+            'gross_margin': gross_margin,
+            'inventory_turnover': turnover,
+            'retention_rate': retention_rate
+        }
+
+    def get_product_profitability(self):
+        # 7. Product-wise Profitability (Top 5)
+        conn = self.db.get_connection()
+        query = """
+            SELECT name, (selling_price - cost_price) * sales_count as total_profit 
+            FROM products 
+            ORDER BY total_profit DESC 
+            LIMIT 5
+        """
+        return pd.read_sql_query(query, conn)
 
     def predict_sales(self, df):
+        # 10. Sales Forecast
         if len(df) < 2: return None, None
         
         df['idx'] = range(len(df))
