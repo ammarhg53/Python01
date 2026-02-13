@@ -66,14 +66,20 @@ class DatabaseManager:
     def reset_database(self, conn):
         """Drops all tables and rebuilds them with fresh, clean seed data."""
         cursor = conn.cursor()
+        
+        # Disable foreign keys temporarily to drop tables safely
+        cursor.execute("PRAGMA foreign_keys = OFF")
+        
         tables = ['order_items', 'orders', 'products', 'categories', 'customers', 'users', 'settings']
         for table in tables:
             cursor.execute(f"DROP TABLE IF EXISTS {table}")
         conn.commit()
         
+        # Re-enable foreign keys and recreate tables
+        cursor.execute("PRAGMA foreign_keys = ON")
         self.create_tables(conn)
         
-        # Fix: Create a new cursor and pass both cursor and conn to seed_data
+        # Seed data with fresh cursor
         cursor = conn.cursor()
         self.seed_data(cursor, conn)
 
@@ -251,13 +257,26 @@ class DatabaseManager:
                 status = 'cancelled'
                 reason = "Customer changed mind"
 
-            # Insert Order Items
+            # Prepare Order Items (Calculate Total FIRST)
+            # CRITICAL FIX: Do NOT insert into order_items before orders
+            current_order_items = []
             for item in selected_items:
                 qty = random.randint(1, 3)
                 price = item['sell']
                 cost = item['cost']
                 total_sell += price * qty
-                
+                current_order_items.append((item, qty, price, cost))
+
+            total_amount = total_sell * (1 + gst_rate)
+            gst_amount = total_sell * gst_rate
+            
+            # 1. Insert ORDER First (Parent)
+            cursor.execute('''INSERT INTO orders (order_id, customer_mobile, operator_username, total_amount, gst_amount, payment_mode, timestamp, status, cancellation_reason)
+                              VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)''',
+                           (order_id, cust_mobile, "pos1", total_amount, gst_amount, pay_mode, order_date, status, reason))
+            
+            # 2. Insert Order Items (Children) & Update Stock
+            for item, qty, price, cost in current_order_items:
                 cursor.execute("INSERT INTO order_items (order_id, product_id, quantity, price, cost) VALUES (?, ?, ?, ?, ?)",
                                (order_id, item['id'], qty, price, cost))
                 
@@ -265,14 +284,8 @@ class DatabaseManager:
                 if status == 'active':
                     cursor.execute("UPDATE products SET stock = stock - ?, sales_count = sales_count + ? WHERE id=?", 
                                    (qty, qty, item['id']))
-
-            total_amount = total_sell * (1 + gst_rate)
-            gst_amount = total_sell * gst_rate
             
-            cursor.execute('''INSERT INTO orders (order_id, customer_mobile, operator_username, total_amount, gst_amount, payment_mode, timestamp, status, cancellation_reason)
-                              VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)''',
-                           (order_id, cust_mobile, "pos1", total_amount, gst_amount, pay_mode, order_date, status, reason))
-            
+            # 3. Update Customer Stats
             if status == 'active':
                 cursor.execute("UPDATE customers SET total_spent = total_spent + ?, total_visits = total_visits + 1 WHERE mobile=?", (total_amount, cust_mobile))
             else:
