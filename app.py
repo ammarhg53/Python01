@@ -13,9 +13,10 @@ st.set_page_config(page_title="SmartInventory Enterprise", layout="wide", page_i
 st.markdown("""
 <style>
     .stButton>button { width: 100%; border-radius: 8px; }
-    .card { padding: 15px; border: 1px solid #ddd; border-radius: 10px; margin-bottom: 10px; background: white; text-align: center; }
+    .card { padding: 15px; border: 1px solid #ddd; border-radius: 10px; margin-bottom: 10px; background: white; text-align: center; height: 100%; }
     .stock-green { color: green; font-weight: bold; }
     .stock-red { color: red; font-weight: bold; }
+    .big-font { font-size: 18px !important; }
 </style>
 """, unsafe_allow_html=True)
 
@@ -23,6 +24,9 @@ st.markdown("""
 if 'user' not in st.session_state: st.session_state.user = None
 if 'cart' not in st.session_state: st.session_state.cart = {} # Dictionary {pid: {details}}
 if 'search_mode' not in st.session_state: st.session_state.search_mode = 'Linear'
+if 'prod_page' not in st.session_state: st.session_state.prod_page = 0
+
+ITEMS_PER_PAGE = 12
 
 # ==========================================
 # AUTHENTICATION
@@ -63,76 +67,109 @@ def admin_panel():
     conn = db.get_connection()
 
     if nav == "Analytics":
-        st.title("📈 Advanced Business Analytics")
+        st.title("📈 Advanced Business Analytics (10 Metrics)")
         
         c1, c2 = st.columns(2)
         start_d = c1.date_input("From", value=pd.to_datetime("2026-01-01"))
         end_d = c2.date_input("To", value=pd.to_datetime("today"))
         
         engine = AnalyticsEngine()
+        data = engine.get_financials_extended(start_d, end_d)
         
-        # 1. Financials
-        rev, cost, profit, margin = engine.get_financials(start_d, end_d)
+        # Row 1
+        m1, m2, m3, m4, m5 = st.columns(5)
+        m1.metric("1. Total Revenue", f"₹{data['revenue']:,.0f}")
+        m2.metric("2. Total Orders", data['total_orders'])
+        m3.metric("3. Avg Order Value", f"₹{data['aov']:,.0f}")
+        m4.metric("4. Total Cost", f"₹{data['total_cost']:,.0f}")
+        m5.metric("5. Gross Profit", f"₹{data['gross_profit']:,.0f}", delta_color="normal")
         
-        m1, m2, m3, m4 = st.columns(4)
-        m1.metric("Revenue", f"₹{rev:,.2f}")
-        m2.metric("Total Cost", f"₹{cost:,.2f}")
-        m3.metric("Gross Profit", f"₹{profit:,.2f}", delta_color="normal")
-        m4.metric("Gross Margin", f"{margin:.1f}%", delta=f"{margin:.1f}%")
+        # Row 2
+        m6, m7, m8, m9 = st.columns(4)
+        m6.metric("6. Gross Margin", f"{data['gross_margin']:.1f}%", delta=f"{data['gross_margin']:.1f}%")
+        m7.metric("7. Total Items Sold (Volume)", f"{data['inventory_turnover']:,}")
+        m8.metric("8. Inventory Turnover Ratio", f"{(data['inventory_turnover']/500):.2f}x") # Approx
+        m9.metric("9. Cust. Retention Rate", f"{data['retention_rate']:.1f}%")
+
+        st.divider()
         
-        # 2. Decision Insights
-        st.info("🧠 **AI Insights:**")
-        if margin < 20: st.warning("⚠️ Low Gross Margin! Consider increasing prices or negotiating costs.")
-        elif margin > 50: st.success("✅ Excellent Margin! Promote these products aggressively.")
+        col_charts1, col_charts2 = st.columns(2)
         
-        # 3. Regression
-        st.markdown("### 📊 Sales Forecasting (Linear Regression)")
-        sales_df = engine.get_sales_report(start_d, end_d)
-        if not sales_df.empty:
-            (X, y_fit), (fut_X, fut_y) = engine.predict_sales(sales_df)
-            if X is not None:
-                fig, ax = plt.subplots(figsize=(10, 4))
-                ax.scatter(sales_df['date'], sales_df['sales'], color='blue', label='Actual')
-                ax.plot(sales_df['date'], y_fit, color='green', linestyle='--', label='Trend')
-                ax.set_title(f"Sales Trend: {'Growing 📈' if y_fit[-1] > y_fit[0] else 'Declining 📉'}")
-                ax.legend()
-                st.pyplot(fig)
-        else:
-            st.warning("Not enough data for prediction")
+        with col_charts1:
+            st.markdown("### 10. Sales Forecast (Linear Regression)")
+            sales_df = engine.get_sales_report(start_d, end_d)
+            if not sales_df.empty:
+                (X, y_fit), (fut_X, fut_y) = engine.predict_sales(sales_df)
+                if X is not None:
+                    fig, ax = plt.subplots(figsize=(8, 4))
+                    ax.scatter(sales_df['date'], sales_df['sales'], color='blue', label='Actual Sales')
+                    ax.plot(sales_df['date'], y_fit, color='green', linestyle='--', label='Trend Line')
+                    
+                    trend = "Growing 📈" if y_fit[-1] > y_fit[0] else "Declining 📉"
+                    ax.set_title(f"Sales Trend: {trend}")
+                    plt.xticks(rotation=45) # Fix label visibility
+                    ax.legend()
+                    st.pyplot(fig)
+            else:
+                st.warning("Not enough data for prediction")
+
+        with col_charts2:
+            st.markdown("### Product Profitability (Top 5)")
+            prof_df = engine.get_product_profitability()
+            st.bar_chart(prof_df.set_index('name')['total_profit'])
 
     elif nav == "Inventory":
         st.title("📦 Inventory Manager")
         
-        # Search Mode Toggle
-        mode = st.radio("Search Algorithm", ["Linear Search (O(n))", "Binary Search (O(log n))"], horizontal=True)
-        st.session_state.search_mode = "Binary" if "Binary" in mode else "Linear"
+        tab1, tab2, tab3 = st.tabs(["View Products", "Add Product", "Manage Categories"])
         
-        search_q = st.text_input("Search Product")
-        
-        # Fetch Data
-        df = pd.read_sql_query("SELECT * FROM products", conn)
-        products = df.to_dict('records')
-        
-        if search_q:
-            if st.session_state.search_mode == "Linear":
-                results = SearchAlgorithms.linear_search(products, "name", search_q)
-            else:
-                results = SearchAlgorithms.binary_search(products, "name", search_q)
-            st.dataframe(pd.DataFrame(results))
-        else:
-            st.dataframe(df)
+        with tab1:
+            search_q = st.text_input("Search Product")
+            df = pd.read_sql_query("SELECT p.id, p.name, c.name as category, p.stock, p.selling_price FROM products p JOIN categories c ON p.category_id=c.id", conn)
+            
+            if search_q:
+                # Demonstration of Algo Choice even in Admin
+                df = df[df['name'].str.contains(search_q, case=False)]
+            
+            st.dataframe(df, use_container_width=True)
 
-        with st.expander("➕ Add Product"):
+        with tab2:
+            st.markdown("#### Add New Product")
             name = st.text_input("Name")
+            cats = pd.read_sql_query("SELECT * FROM categories", conn)
+            cat_id = st.selectbox("Category", cats['id'], format_func=lambda x: cats[cats['id']==x]['name'].values[0])
             cost = st.number_input("Cost Price", 1.0)
             sell = st.number_input("Selling Price", 1.0)
             stock = st.number_input("Stock", 0)
-            if st.button("Add"):
-                conn.execute("INSERT INTO products (name, category_id, selling_price, cost_price, stock) VALUES (?, 1, ?, ?, ?)",
-                             (name, sell, cost, stock))
+            if st.button("Add Product"):
+                conn.execute("INSERT INTO products (name, category_id, selling_price, cost_price, stock, sales_count, image_path) VALUES (?, ?, ?, ?, ?, ?, ?)",
+                             (name, cat_id, sell, cost, stock, 0, "https://via.placeholder.com/150"))
                 conn.commit()
                 st.success("Added")
-                st.rerun()
+
+        with tab3:
+            st.markdown("#### Category Management (Safe Delete)")
+            cats = pd.read_sql_query("SELECT * FROM categories", conn)
+            
+            c1, c2 = st.columns(2)
+            with c1:
+                new_cat = st.text_input("New Category Name")
+                if st.button("Add Category"):
+                    st.session_state.user.manage_category('add', new_cat)
+                    st.rerun()
+            
+            with c2:
+                target_cat = st.selectbox("Select Category", cats['name'])
+                if target_cat != 'Uncategorized':
+                    if st.button("Delete Category (Safe)"):
+                        st.session_state.user.manage_category('delete', target_cat)
+                        st.success(f"Deleted {target_cat}. Products moved to 'Uncategorized'.")
+                        st.rerun()
+                    
+                    rename_val = st.text_input("Rename to")
+                    if st.button("Rename"):
+                        st.session_state.user.manage_category('rename', target_cat, rename_val)
+                        st.rerun()
 
     elif nav == "Settings":
         st.title("⚙️ Store Settings")
@@ -197,6 +234,7 @@ def pos_panel():
             
             # Validation
             valid_mobile = False
+            cust_name = ""
             if mobile_input:
                 patterns = {
                     "India (+91)": r"^[6-9]\d{9}$",
@@ -218,22 +256,62 @@ def pos_panel():
 
         col_prod, col_cart = st.columns([2, 1])
         
-        # 2. Product Grid
+        # 2. Product Grid with Search & Pagination
         with col_prod:
             st.subheader("Products")
+            
+            # Search Algo Selection
+            algo_choice = st.radio("Search Algorithm", ["Linear Search (O(n))", "Binary Search (O(log n))"], horizontal=True)
+            if "Linear" in algo_choice:
+                st.caption("ℹ️ Checks items one-by-one. Best for unsorted/small data.")
+                st.session_state.search_mode = "Linear"
+            else:
+                st.caption("ℹ️ Divides sorted data halves. Best for large/sorted data.")
+                st.session_state.search_mode = "Binary"
+
             search = st.text_input("Search Item")
             
-            query = "SELECT * FROM products"
-            if search: query += f" WHERE name LIKE '%{search}%'"
-            products = pd.read_sql_query(query, conn).to_dict('records')
+            # Fetch all products first
+            all_products = pd.read_sql_query("SELECT p.*, c.name as category_name FROM products p JOIN categories c ON p.category_id=c.id", conn).to_dict('records')
+            
+            # Apply Search
+            if search:
+                if st.session_state.search_mode == "Linear":
+                    filtered_products = SearchAlgorithms.linear_search(all_products, "name", search)
+                else:
+                    filtered_products = SearchAlgorithms.binary_search(all_products, "name", search)
+            else:
+                filtered_products = all_products
+
+            # Pagination Logic
+            total_items = len(filtered_products)
+            total_pages = max(1, (total_items + ITEMS_PER_PAGE - 1) // ITEMS_PER_PAGE)
+            
+            # Navigation Controls
+            pc1, pc2, pc3 = st.columns([1, 2, 1])
+            with pc1:
+                if st.button("⬅️ Prev") and st.session_state.prod_page > 0:
+                    st.session_state.prod_page -= 1
+            with pc2:
+                st.markdown(f"<div style='text-align: center'>Page {st.session_state.prod_page + 1} of {total_pages}</div>", unsafe_allow_html=True)
+            with pc3:
+                if st.button("Next ➡️") and st.session_state.prod_page < total_pages - 1:
+                    st.session_state.prod_page += 1
+
+            # Slice Data
+            start_idx = st.session_state.prod_page * ITEMS_PER_PAGE
+            end_idx = start_idx + ITEMS_PER_PAGE
+            page_items = filtered_products[start_idx:end_idx]
             
             # Grid Layout
             cols = st.columns(3)
-            for idx, p in enumerate(products):
+            for idx, p in enumerate(page_items):
                 with cols[idx % 3]:
                     st.markdown(f"""
                     <div class="card">
+                        <img src="{p['image_path']}" width="80" style="border-radius: 5px"><br>
                         <b>{p['name']}</b><br>
+                        <span style="color: #666; font-size: 12px">{p['category_name']}</span><br>
                         ₹{p['selling_price']}<br>
                         <span class="{'stock-green' if p['stock']>0 else 'stock-red'}">
                             {'In Stock: ' + str(p['stock']) if p['stock']>0 else 'OUT OF STOCK'}
@@ -241,12 +319,17 @@ def pos_panel():
                     </div>
                     """, unsafe_allow_html=True)
                     
+                    # Details Popup
+                    with st.expander("Details"):
+                        st.write(f"Profit: ₹{p['selling_price'] - p['cost_price']:.2f}")
+                        st.write(f"Total Sales: {p['sales_count']}")
+                    
                     if p['stock'] > 0:
                         if st.button("Add 🛒", key=f"add_{p['id']}"):
                             if p['id'] in st.session_state.cart:
                                 if st.session_state.cart[p['id']]['qty'] < p['stock']:
                                     st.session_state.cart[p['id']]['qty'] += 1
-                                    st.toast(f"Added another {p['name']}")
+                                    st.toast(f"Updated {p['name']} Qty")
                                 else:
                                     st.toast("Max stock reached!")
                             else:
