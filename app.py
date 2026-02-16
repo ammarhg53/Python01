@@ -499,12 +499,12 @@ def pos_panel():
                             st.error("Invalid Name")
                             card_valid = False
                         
-                        # Relaxed length check + Luhn Check
+                        # Validate Card Number (Structure + Luhn)
                         if not re.match(r"^\d{13,19}$", c_num): 
-                            st.error("Invalid Card Number Length (13-19 digits)")
-                            card_valid = False
+                             st.error("Invalid Card Number Length (13-19 digits)")
+                             card_valid = False
                         elif not validate_card_luhn(c_num):
-                            st.error("Invalid Card Number (Checksum Failed)")
+                            st.error("Invalid Card Number (Fake or Invalid)")
                             card_valid = False
                             
                         if not re.match(r"^\d{3}$", c_cvv): 
