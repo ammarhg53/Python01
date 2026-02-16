@@ -4,7 +4,7 @@ import numpy as np
 import matplotlib.pyplot as plt
 import os
 import re
-from backend import DatabaseManager, User, Admin, POSOperator, SearchAlgorithms, AnalyticsEngine, generate_qr, generate_pdf
+from backend import DatabaseManager, User, Admin, POSOperator, SearchAlgorithms, AnalyticsEngine, generate_qr, generate_pdf, validate_card_luhn, validate_expiry
 
 # ==========================================
 # PAGE CONFIG
@@ -488,7 +488,7 @@ def pos_panel():
                 
                 if pay_mode == "Card":
                     c_name = st.text_input("Card Holder Name")
-                    c_num = st.text_input("Card No (16 digits)", max_chars=16)
+                    c_num = st.text_input("Card No", max_chars=19, help="Enter 13-19 digit card number")
                     c1, c2 = st.columns(2)
                     c_exp = c1.text_input("Expiry (MM/YY)", max_chars=5)
                     c_cvv = c2.text_input("CVV", max_chars=3, type="password")
@@ -498,14 +498,25 @@ def pos_panel():
                         if not re.match(r"^[a-zA-Z\s]+$", c_name): 
                             st.error("Invalid Name")
                             card_valid = False
-                        if not re.match(r"^\d{16}$", c_num): 
-                            st.error("Invalid Card Number")
+                        
+                        # Relaxed length check + Luhn Check
+                        if not re.match(r"^\d{13,19}$", c_num): 
+                            st.error("Invalid Card Number Length (13-19 digits)")
                             card_valid = False
+                        elif not validate_card_luhn(c_num):
+                            st.error("Invalid Card Number (Checksum Failed)")
+                            card_valid = False
+                            
                         if not re.match(r"^\d{3}$", c_cvv): 
                             st.error("Invalid CVV")
                             card_valid = False
+                        
+                        # Format + Logic check for Expiry
                         if not re.match(r"^(0[1-9]|1[0-2])\/\d{2}$", c_exp): 
-                            st.error("Invalid Expiry (MM/YY)")
+                            st.error("Invalid Expiry Format (MM/YY)")
+                            card_valid = False
+                        elif not validate_expiry(c_exp):
+                            st.error("Card has expired or date is invalid")
                             card_valid = False
                     else:
                         card_valid = False # Fields empty
