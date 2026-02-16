@@ -686,16 +686,25 @@ def generate_pdf(invoice_data):
 def validate_card_luhn(card_number):
     """
     Validates card number using Luhn Algorithm (Mod 10).
-    Checks if the card number is mathematically valid.
+    Also checks for obvious fake patterns (all zeros, all same digits).
     """
     try:
-        # Remove any spaces or hyphens just in case
+        # Remove any spaces or hyphens
         card_number = str(card_number).replace(" ", "").replace("-", "")
         
+        # Numeric check
         if not card_number.isdigit():
             return False
             
-        # 1. Double every second digit from right to left
+        # Length check (Standard cards are 13-19 digits)
+        if not (13 <= len(card_number) <= 19):
+            return False
+            
+        # REJECT: All identical digits (e.g., 0000..., 1111..., 9999...)
+        if len(set(card_number)) == 1:
+            return False
+            
+        # Luhn Algorithm
         sum_ = 0
         odd_odd = False
         
