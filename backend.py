@@ -6,6 +6,7 @@ import datetime
 import random
 import qrcode
 import os
+import re
 from abc import ABC, abstractmethod
 from fpdf import FPDF
 
@@ -681,3 +682,61 @@ def generate_pdf(invoice_data):
     filename = f"{safe_name}_{safe_id}_{date_str}.pdf"
     pdf.output(filename)
     return filename
+
+def validate_card_luhn(card_number):
+    """
+    Validates card number using Luhn Algorithm (Mod 10).
+    Checks if the card number is mathematically valid.
+    """
+    try:
+        # Remove any spaces or hyphens just in case
+        card_number = str(card_number).replace(" ", "").replace("-", "")
+        
+        if not card_number.isdigit():
+            return False
+            
+        # 1. Double every second digit from right to left
+        sum_ = 0
+        odd_odd = False
+        
+        for digit in reversed(card_number):
+            digit = int(digit)
+            
+            if odd_odd:
+                digit *= 2
+                if digit > 9:
+                    digit -= 9
+            
+            sum_ += digit
+            odd_odd = not odd_odd
+            
+        return sum_ % 10 == 0
+    except:
+        return False
+
+def validate_expiry(expiry_str):
+    """
+    Validates that the expiry date (MM/YY) is in the future.
+    """
+    try:
+        if not re.match(r"^(0[1-9]|1[0-2])\/\d{2}$", expiry_str):
+            return False
+            
+        month, year = map(int, expiry_str.split('/'))
+        
+        # Assume 2000s for 2-digit year
+        year += 2000
+        
+        now = datetime.datetime.now()
+        current_year = now.year
+        current_month = now.month
+        
+        # Check if date is in the past
+        if year < current_year:
+            return False
+        if year == current_year and month < current_month:
+            return False
+            
+        return True
+    except:
+        return False
