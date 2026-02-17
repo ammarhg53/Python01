@@ -633,51 +633,50 @@ class AnalyticsEngine:
         """
     
         return pd.read_sql_query(query, conn)
-      def predict_sales(self, df, mode='Linear'):
-    # This function predicts future sales based on past data.
-    # Idea: find a trend line from past sales and extend it forward.
-
-    # If there is not enough data, prediction is not possible
-    if len(df) < 2:
-        return None, None
-        
-    # We create a numeric index column because math models need numbers
-    # Example: Day1=0, Day2=1, Day3=2 ...
-    df['idx'] = range(len(df))
-
-    # X = input values (day numbers)
-    # y = output values (sales amount)
-    X = df['idx'].values
-    y = df['sales'].values
-        
-    # degree decides the type of curve:
-    # degree 1 = straight line
-    # degree 3 = curved line (better for fluctuating sales)
-    degree = 1 if mode == 'Linear' else 3
-        
-    # polyfit finds the best mathematical equation
-    # which fits the past sales points
-    # This is called regression / trend fitting
-    coeffs = np.polyfit(X, y, degree)
-
-    # poly1d converts coefficients into usable formula function
-    # So now we can do poly(x) to get predicted sales
-    poly = np.poly1d(coeffs)
-        
-    # Create next 7 future day numbers
-    future_X = np.arange(len(df), len(df) + 7)
-
-    # Put those future days into the equation to get prediction
-    future_y = poly(future_X)
-        
-    # Return:
-    # 1) past trend line values
-    # 2) future predicted values
-    # So graph can draw both
-    return (X, poly(X)), (future_X, future_y)
-
   
-        
+    def predict_sales(self, df, mode='Linear'):
+        # This function predicts future sales based on past data.
+        # Idea: find a trend line from past sales and extend it forward.
+
+        # If there is not enough data, prediction is not possible
+        if len(df) < 2:
+            return None, None
+            
+        # We create a numeric index column because math models need numbers
+        # Example: Day1=0, Day2=1, Day3=2 ...
+        df['idx'] = range(len(df))
+
+        # X = input values (day numbers)
+        # y = output values (sales amount)
+        X = df['idx'].values
+        y = df['sales'].values
+            
+        # degree decides the type of curve:
+        # degree 1 = straight line
+        # degree 3 = curved line (better for fluctuating sales)
+        degree = 1 if mode == 'Linear' else 3
+            
+        # polyfit finds the best mathematical equation
+        # which fits the past sales points
+        # This is called regression / trend fitting
+        coeffs = np.polyfit(X, y, degree)
+
+        # poly1d converts coefficients into usable formula function
+        # So now we can do poly(x) to get predicted sales
+        poly = np.poly1d(coeffs)
+            
+        # Create next 7 future day numbers
+        future_X = np.arange(len(df), len(df) + 7)
+
+        # Put those future days into the equation to get prediction
+        future_y = poly(future_X)
+            
+        # Return:
+        # 1) past trend line values
+        # 2) future predicted values
+        # So graph can draw both
+        return (X, poly(X)), (future_X, future_y)
+      
         
         
         
