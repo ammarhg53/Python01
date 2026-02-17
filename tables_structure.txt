@@ -1,0 +1,126 @@
+1️⃣ USERS TABLE
+
+Purpose: stores login accounts (admin & POS)
+
+Main columns:
+
+id (PK)
+
+username
+
+password_hash
+
+role
+
+Relation: none (independent table)
+
+👉 Used for authentication.
+
+🔹 2️⃣ CATEGORIES TABLE
+
+Purpose: stores product categories
+
+Main columns:
+
+id (PK)
+
+name
+
+Relation:
+➡ connected to products
+
+👉 One category → many products
+
+🔹 3️⃣ PRODUCTS TABLE
+
+Purpose: stores all product details
+
+Main columns:
+
+id (PK)
+
+name
+
+category_id (FK → categories.id)
+
+selling_price
+
+stock
+
+sales_count
+
+👉 Links product to category.
+
+🔹 4️⃣ CUSTOMERS TABLE
+
+Purpose: stores customer info & stats
+
+Main columns:
+
+mobile (PK)
+
+name
+
+total_spent
+
+total_visits
+
+👉 Links to orders.
+
+🔹 5️⃣ ORDERS TABLE
+
+Purpose: stores each bill/transaction
+
+Main columns:
+
+order_id (PK)
+
+customer_mobile (FK → customers.mobile)
+
+total_amount
+
+payment_mode
+
+timestamp
+
+status
+
+👉 One order belongs to one customer.
+
+🔹 6️⃣ ORDER_ITEMS TABLE ⭐
+
+Purpose: stores products inside each order
+
+Main columns:
+
+id (PK)
+
+order_id (FK → orders.order_id)
+
+product_id (FK → products.id)
+
+quantity
+
+price
+
+👉 Connects orders and products.
+
+This handles multiple items in one bill.
+
+🔹 7️⃣ SETTINGS TABLE
+
+Purpose: stores system configuration
+
+Main columns:
+
+key (PK)
+
+value
+
+👉 Example:
+
+GST %
+
+Store name
+
+UPI id
