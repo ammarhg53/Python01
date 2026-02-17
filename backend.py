@@ -1,3 +1,9 @@
+# This backend file contains all core logic of the system.
+# It handles database creation, user login, order processing,
+# analytics calculations, and utility features like QR code,
+# PDF bill generation and card validation.
+
+
 import sqlite3
 import hashlib
 import pandas as pd
@@ -13,6 +19,10 @@ from fpdf import FPDF
 # ==========================================
 # 1. DATABASE & SINGLETON PATTERN
 # ==========================================
+# DatabaseManager handles connection and setup of SQLite database.
+# Singleton pattern is used so only one DB instance is created.
+
+
 class DatabaseManager:
     _instance = None
     DB_NAME = "smart_inventory_pro.db"
@@ -161,6 +171,11 @@ class DatabaseManager:
 
         conn.commit()
 
+
+ # This function inserts demo users, products, customers and orders
+# so the system works immediately and analytics dashboard shows data.
+       
+
     def seed_data(self, cursor, conn):
         """Strict clean seeding with realistic data."""
         if isinstance(cursor, sqlite3.Connection):
@@ -297,6 +312,10 @@ class DatabaseManager:
 # ==========================================
 # 2. ALGORITHMS
 # ==========================================
+# Binary search works on sorted data.
+# First sorts the list, then finds match faster using divide-and-conquer.
+# After finding one match, it scans left and right to collect all matches.
+
 class SearchAlgorithms:
     @staticmethod
     def linear_search(data_list, key, value):
@@ -673,7 +692,6 @@ def generate_pdf(invoice_data):
     pdf.cell(40, 10, f"{invoice_data['total']:.2f}", 0, 1)
     
     # FORMAT: <CustomerName>_<BillNumber>_<Date>.pdf
-    # Sanitize customer name to remove spaces or bad chars for filename
     safe_name = str(invoice_data['customer_name']).replace(" ", "_")
     safe_id = str(invoice_data['id'])
     # Using date.today() for YYYY-MM-DD format
@@ -682,6 +700,13 @@ def generate_pdf(invoice_data):
     filename = f"{safe_name}_{safe_id}_{date_str}.pdf"
     pdf.output(filename)
     return filename
+
+#Start from right
+# Double alternate digits
+# If >9 subtract 9
+# Add all
+# If divisible by 10 → valid
+
 
 def validate_card_luhn(card_number):
     """
@@ -692,6 +717,9 @@ def validate_card_luhn(card_number):
         # Remove any spaces or hyphens
         card_number = str(card_number).replace(" ", "").replace("-", "")
         
+
+
+
         # Numeric check
         if not card_number.isdigit():
             return False
