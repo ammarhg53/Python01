@@ -633,23 +633,43 @@ class AnalyticsEngine:
         """
         return pd.read_sql_query(query, conn)
 
-    def predict_sales(self, df, mode='Linear'):
-        if len(df) < 2: return None, None
-        
-        df['idx'] = range(len(df))
-        X = df['idx'].values
-        y = df['sales'].values
-        
-        degree = 1 if mode == 'Linear' else 3
-        
-        coeffs = np.polyfit(X, y, degree)
-        poly = np.poly1d(coeffs)
-        
-        future_X = np.arange(len(df), len(df) + 7)
-        future_y = poly(future_X)
-        
-        return (X, poly(X)), (future_X, future_y)
+def predict_sales(self, df, mode='Linear'):
+    # get sales column (works for pandas or list)
+    try:
+        sales = np.array(df['sales'])
+    except:
+        sales = np.array([row['sales'] for row in df])
 
+    if len(sales) < 2:
+        return None, None
+
+    # X axis index
+    X = np.arange(len(sales))
+
+    # ---- SIMPLE TREND (average smoothing) ----
+    trend = sales.copy().astype(float)
+    for i in range(1, len(sales)):
+        trend[i] = (sales[i] + sales[i-1]) / 2   # average of current & previous
+
+    # ---- SIMPLE ZIG-ZAG FUTURE ----
+    future_X = np.arange(len(sales), len(sales)+7)
+    future_y = []
+
+    last = sales[-1]
+    step = abs(sales[-1] - sales[-2]) if len(sales) >= 2 else 50
+
+    for i in range(7):
+        if i % 2 == 0:
+            last = last + step   # go up
+        else:
+            last = last - step   # go down
+
+        last = max(0, last)
+        future_y.append(last)
+
+    future_y = np.array(future_y)
+
+    return (X, trend), (future_X, future_y)
 # ==========================================
 # 5. UTILITIES
 # ==========================================
