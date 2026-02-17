@@ -1,3 +1,11 @@
+# importing required libraries for UI, data, graphs and backend functions
+# streamlit is used to build the web app
+# pandas & numpy for data handling
+# matplotlib for charts
+# os and re for file handling and validation
+
+# backend file contains all database logic and helper functions
+
 import streamlit as st
 import pandas as pd
 import numpy as np
@@ -9,6 +17,10 @@ from backend import DatabaseManager, User, Admin, POSOperator, SearchAlgorithms,
 # ==========================================
 # PAGE CONFIG
 # ==========================================
+
+# setting page title, layout and icon for streamlit app
+# also adding some custom CSS styling to improve UI look
+
 st.set_page_config(page_title="SmartInventory Enterprise", layout="wide", page_icon="📦")
 st.markdown("""
 <style>
@@ -23,6 +35,14 @@ st.markdown("""
 </style>
 """, unsafe_allow_html=True)
 
+
+# session_state is used to store values while app is running
+# user -> stores logged in user object
+# cart -> stores items added for billing
+# search_mode -> stores which search algo user selected
+# prod_page -> used for pagination in product grid
+
+
 # Session State Init
 if 'user' not in st.session_state: st.session_state.user = None
 if 'cart' not in st.session_state: st.session_state.cart = {} # Dictionary {pid: {details}}
@@ -34,6 +54,13 @@ ITEMS_PER_PAGE = 12
 # ==========================================
 # AUTHENTICATION
 # ==========================================
+
+# this function shows login screen
+# it checks username & password from backend user class
+# if login success, user stored in session and page reloads
+
+
+
 def login():
     st.title("📦 SmartInventory Enterprise")
     c1, c2 = st.columns([1, 2])
@@ -55,6 +82,12 @@ def login():
 # ==========================================
 # ADMIN PANEL
 # ==========================================
+# this function controls full admin dashboard
+# sidebar menu decides which admin page to show
+# database connection created here
+
+
+
 def admin_panel():
     st.sidebar.header(f"👤 Admin: {st.session_state.user.username}")
     nav = st.sidebar.radio("Menu", ["Analytics", "Orders & Cancellations", "Inventory", "Settings", "Profile", "Manage Operators"])
@@ -139,6 +172,9 @@ def admin_panel():
                     plt.xticks(rotation=45)
                     ax.legend()
                     st.pyplot(fig)
+# admin can view order history here
+# filtering based on status active/cancelled
+# also admin can cancel any order with reason & password confirmation
 
     elif nav == "Orders & Cancellations":
         st.title("📦 Order Management & Audit")
@@ -205,6 +241,12 @@ def admin_panel():
                         st.session_state.c_reason = reason_input
                         st.session_state.c_pass = pass_input
                         st.rerun()
+# this part allows admin to manage products
+# tab1 -> view products
+# tab2 -> add new product with validation
+# tab3 -> restock existing items
+# tab4 -> manage categories like add or rename
+
 
     elif nav == "Inventory":
         st.title("📦 Inventory Manager")
@@ -274,6 +316,10 @@ def admin_panel():
                         st.rerun()
                     else:
                         st.error("Error")
+# admin can change store name, UPI ID and GST settings here
+# values stored in database settings table
+
+
 
     elif nav == "Settings":
         st.title("⚙️ Store Settings")
@@ -309,6 +355,11 @@ def admin_panel():
 # ==========================================
 # POS PANEL
 # ==========================================
+# this function is used by POS operator for billing
+# contains customer input, product selection and cart system
+
+
+
 def pos_panel():
     st.sidebar.header(f"🛒 POS: {st.session_state.user.username}")
     menu = st.sidebar.radio("Menu", ["Billing", "Profile"])
@@ -366,18 +417,15 @@ def pos_panel():
                                 st.rerun()
             
             # Block billing if new customer not registered yet
-            # Actually, the logic usually is: enter mobile, if not found, ask name. 
-            # If name entered, proceed. We can register implicitly or explicitly. 
-            # The prompt says "If mobile does NOT exist: Show input field: Customer Name. Name is mandatory".
-            # We will handle the implicit registration during order processing or explicit via button.
-            # For smoother flow, we'll keep the implicit registration logic if we can, or just force them to check.
-            # To stick to "Register Customer" flow from previous code:
             if valid_mobile and not cust_name and not cust: 
                  st.info("Please enter name and register to proceed.")
 
         col_prod, col_cart = st.columns([2, 1])
         
-        # 2. Product Grid (Clean Text-Based Cards)
+# products loaded from database
+# user can search product using linear or binary search
+# pagination used to show limited items per page
+# add to cart button updates session cart dictionary
         with col_prod:
             st.subheader("Products")
             algo_choice = st.radio("Search Algorithm", ["Linear Search (O(n))", "Binary Search (O(log n))"], horizontal=True)
@@ -410,7 +458,6 @@ def pos_panel():
             cols = st.columns(3)
             for idx, p in enumerate(page_items):
                 with cols[idx % 3]:
-                    # Clean Card UI (No Images, forced Black Text)
                     st.markdown(f"""
                     <div class="card">
                         <h4>{p['name']}</h4>
@@ -436,6 +483,9 @@ def pos_panel():
                                 st.toast(f"Added {p['name']}")
                     else:
                         st.button("🚫", disabled=True, key=f"no_{p['id']}")
+# shows all selected products
+# allows quantity change or remove item
+# calculates subtotal, GST and final total
 
         # 3. Cart
         with col_cart:
@@ -482,7 +532,17 @@ def pos_panel():
                 st.write(f"Subtotal: ₹{total_val:.2f}")
                 st.write(f"GST: ₹{gst_amt:.2f}")
                 st.markdown(f"### Total: ₹{final_total:.2f}")
+# user selects payment mode: cash, card or UPI
+# card mode includes validations:
+#   name format check
+#   card length check
+#   luhn algorithm validation
+#   expiry date check
+# UPI mode generates QR code dynamically
                 
+
+
+
                 pay_mode = st.radio("Payment Mode", ["Cash", "Card", "UPI"])
                 card_valid = True
                 
@@ -526,14 +586,19 @@ def pos_panel():
                         qr_path = generate_qr(settings.get("upi_id"), settings.get("store_name"), final_total)
                         st.image(qr_path, caption="Scan", width=200)
 
-                # Complete Order Button
-                # Needs valid mobile (and if new, registered), valid cart, and valid payment
+ # Complete Order Button
+# Needs valid mobile (and if new, registered), valid cart, and valid payment
+# after payment validation order is processed
+# database updated and stock reduced
+# PDF bill generated automatically
+# user can download invoice
+# cart cleared after order success
+
                 proceed_enabled = valid_mobile and final_total > 0 and cust_name
                 if pay_mode == "Card" and not card_valid:
                     proceed_enabled = False
 
                 if st.button("✅ Complete Order", disabled=not proceed_enabled):
-                    # Double check if customer exists, if not create on the fly (for implicit case)
                     check_cust = conn.execute("SELECT mobile FROM customers WHERE mobile=?", (mobile_input,)).fetchone()
                     if not check_cust:
                          conn.execute("INSERT INTO customers (mobile, name) VALUES (?,?)", (mobile_input, cust_name))
@@ -554,7 +619,7 @@ def pos_panel():
                     with open(pdf_file, "rb") as f:
                         pdf_data = f.read()
 
-                    # Success and Download (No Rerun immediately to allow download)
+                    # Success and Download 
                     st.success(f"Order {oid} Successful!")
                     st.download_button("📄 Download Bill", data=pdf_data, file_name=pdf_file, mime="application/pdf")
                     
@@ -564,6 +629,11 @@ def pos_panel():
 
     elif menu == "Profile":
         profile_section()
+
+# user can change password here
+# old password verified first
+# new password strength checked
+
 
 def profile_section():
     st.title("👤 My Profile")
@@ -580,6 +650,11 @@ def profile_section():
                     st.error("Weak Password")
             else:
                 st.error("Incorrect Old Password")
+
+
+# this is the starting point of program
+# if user logged in -> show admin or POS panel
+# if not logged in -> show login page
 
 # ==========================================
 # MAIN
