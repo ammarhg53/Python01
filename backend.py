@@ -631,9 +631,9 @@ class AnalyticsEngine:
             GROUP BY day_name 
             ORDER BY strftime('%w', timestamp)
         """
+    
         return pd.read_sql_query(query, conn)
-
-def predict_sales(self, df, mode='Linear'):
+      def predict_sales(self, df, mode='Linear'):
     # This function predicts future sales based on past data.
     # Idea: find a trend line from past sales and extend it forward.
 
@@ -675,6 +675,12 @@ def predict_sales(self, df, mode='Linear'):
     # 2) future predicted values
     # So graph can draw both
     return (X, poly(X)), (future_X, future_y)
+
+  
+        
+        
+        
+        
 
 # ==========================================
 # 5. UTILITIES
